@@ -228,6 +228,17 @@ const (
 	StopCompression
 )
 
+// FailureClass maps a non-error, non-completed stop to an item failure class and
+// a safe reason. Only StopMaxRounds is a declared budget stop; the empty-round and
+// compression exits are genuine but unclassifiable, so every other stop maps to
+// the honest unknown catch-all. Both the review and scan agents classify with it.
+func (s MainLoopStop) FailureClass() (session.FailureClass, string) {
+	if s == StopMaxRounds {
+		return session.FailureBudget, "reached the maximum tool-request rounds without finishing"
+	}
+	return session.FailureUnknown, "main task stopped before completing"
+}
+
 // RunPerFile drives the main LLM conversation loop for a single file.
 // It sends messages with the configured tool definitions, executes any
 // tool calls returned by the model, and collects review comments until

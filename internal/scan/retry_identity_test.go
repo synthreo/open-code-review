@@ -128,7 +128,7 @@ func TestScanRequestsCarryNoIdentity(t *testing.T) {
 		// executeSubtask drives llmloop.RunPerFile, the code path scan shares
 		// with review — so this is the assertion that NewAgent leaves
 		// Deps.NewRequestMeta nil.
-		if _, _, err := a.executeSubtask(context.Background(), model.ScanItem{
+		if _, _, _, err := a.executeSubtask(context.Background(), model.ScanItem{
 			Path:    "h.go",
 			Content: "package h\n",
 		}); err != nil {

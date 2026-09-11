@@ -668,7 +668,7 @@ func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.S
 				fileCtx = ctx
 			}
 
-			completedOK, skipReason, err := a.executeSubtask(fileCtx, it)
+			completedOK, stop, skipReason, err := a.executeSubtask(fileCtx, it)
 			if err != nil {
 				atomic.AddInt64(&a.subtaskFailed, 1)
 				a.failures.Add(session.ClassifyItemError(err))
@@ -683,8 +683,9 @@ func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.S
 			if !completedOK {
 				if skipReason != "" {
 					atomic.AddInt64(&a.subtaskFailed, 1)
-					// A file that stopped without task_done has no structured cause.
-					a.failures.Add(session.FailureUnknown)
+					// Max rounds is a declared budget stop; other stops are unknown.
+					class, _ := stop.FailureClass()
+					a.failures.Add(class)
 					a.session.RecordReviewItemFailed(it.Path, it.Path, it.Path, fingerprint, skipReason)
 					a.recordWarning("scan_subtask_error", it.Path, skipReason)
 				}
@@ -711,13 +712,17 @@ func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.S
 // is small enough that planning overhead outweighs gain, or the plan call
 // itself fails. Plan failure never blocks the main review — it falls back
 // to v1 (plan-less) behavior.
-func (a *Agent) executeSubtask(ctx context.Context, it model.ScanItem) (bool, string, error) {
+//
+// A non-completed run returns the loop's MainLoopStop and a skip reason; the
+// stop is classified at its trigger point so the all-failed rollup can report
+// a budget stop as budget.
+func (a *Agent) executeSubtask(ctx context.Context, it model.ScanItem) (bool, llmloop.MainLoopStop, string, error) {
 	ctx, span := telemetry.StartSpan(ctx, "scan.subtask."+it.Path)
 	defer span.End()
 	telemetry.SetAttr(span, "file.path", it.Path)
 
 	if ctx.Err() != nil {
-		return false, "", ctx.Err()
+		return false, llmloop.StopNone, "", ctx.Err()
 	}
 
 	rule := ""
@@ -740,17 +745,17 @@ func (a *Agent) executeSubtask(ctx context.Context, it model.ScanItem) (bool, st
 			telemetry.AnyToAttr("file.path", it.Path),
 			telemetry.AnyToAttr("tokens", tokenCount),
 			telemetry.AnyToAttr("max_tokens", maxAllowed))
-		return false, "", nil
+		return false, llmloop.StopNone, "", nil
 	}
 
-	completed, _, err := a.runner.RunPerFile(ctx, messages, it.Path)
+	completed, stop, err := a.runner.RunPerFile(ctx, messages, it.Path)
 	if err != nil {
-		return false, "", err
+		return false, llmloop.StopNone, "", err
 	}
 	if !completed {
-		return false, "main_task did not complete before stopping", nil
+		return false, stop, "main_task did not complete before stopping", nil
 	}
-	return true, "", nil
+	return true, llmloop.StopNone, "", nil
 }
 
 // maybeRunPlan invokes PLAN_TASK on the file and returns a human-readable

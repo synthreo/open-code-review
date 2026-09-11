@@ -1125,20 +1125,6 @@ func classifyItemError(err error) (session.FailureClass, string) {
 	}
 }
 
-// classifyMainLoopStop maps a non-error, non-completed main-loop stop to an item
-// failure class and a safe reason. Only the configured max-tool-request budget is
-// a declared budget stop; the empty-round and compression exits are genuine but
-// unclassifiable, so they map to the honest unknown catch-all. Only an explicit
-// budget trigger may use the budget classification.
-func classifyMainLoopStop(stop llmloop.MainLoopStop) (session.FailureClass, string) {
-	switch stop {
-	case llmloop.StopMaxRounds:
-		return session.FailureBudget, "reached the maximum tool-request rounds without finishing"
-	default: // StopEmptyRounds, StopCompression, StopNone
-		return session.FailureUnknown, "main task stopped before completing"
-	}
-}
-
 // subtaskStop is the structured, non-error reason a single-file review stopped
 // short of task_done. It lets the dispatcher classify manifest coverage from an
 // explicit cause recorded at the trigger point, instead of re-parsing free text
@@ -1333,7 +1319,7 @@ func (a *Agent) executeSubtask(ctx context.Context, d model.Diff) (bool, *subtas
 	if !mainCompleted {
 		// Distinguish the stop cause at its trigger point: max-rounds is budget,
 		// empty-round / compression are the honest unknown catch-all.
-		class, reason := classifyMainLoopStop(mainStop)
+		class, reason := mainStop.FailureClass()
 		return false, &subtaskStop{
 			class:         class,
 			reason:        reason,

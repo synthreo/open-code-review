@@ -453,7 +453,7 @@ func TestExecuteSubtask_Success(t *testing.T) {
 	a.currentDate = "2026-06-26 10:00"
 
 	it := model.ScanItem{Path: "main.go", Content: "package main\n", LineCount: 1}
-	completed, _, err := a.executeSubtask(context.Background(), it)
+	completed, _, _, err := a.executeSubtask(context.Background(), it)
 	if err != nil {
 		t.Fatalf("executeSubtask: %v", err)
 	}
@@ -510,7 +510,7 @@ func TestExecuteSubtask_WithPlan(t *testing.T) {
 	a.currentDate = "2026-06-26 10:00"
 
 	it := model.ScanItem{Path: "handler.go", Content: "package h\nfunc Handle() error { return nil }\n", LineCount: 2}
-	completed, _, err := a.executeSubtask(context.Background(), it)
+	completed, _, _, err := a.executeSubtask(context.Background(), it)
 	if err != nil {
 		t.Fatalf("executeSubtask: %v", err)
 	}
@@ -526,7 +526,7 @@ func TestExecuteSubtask_ContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, _, err := a.executeSubtask(ctx, model.ScanItem{Path: "a.go", Content: "x", LineCount: 1})
+	_, _, _, err := a.executeSubtask(ctx, model.ScanItem{Path: "a.go", Content: "x", LineCount: 1})
 	if err == nil {
 		t.Fatal("expected error for cancelled context")
 	}
@@ -771,6 +771,11 @@ func TestDispatchSubtasks_WithoutTaskDoneIsAllFailed(t *testing.T) {
 	_, err := a.dispatchSubtasks(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "all 1 file scan(s) failed") {
 		t.Fatalf("expected all-failed error, got %v", err)
+	}
+	// One tool round and no task_done exhausts MaxToolRequestTimes: a declared
+	// budget stop, which the rollup must report as budget, not unknown.
+	if !strings.Contains(err.Error(), "(budget: 1)") {
+		t.Errorf("all-failed error %q does not name the budget class", err)
 	}
 	warnings := a.Warnings()
 	if len(warnings) != 1 || warnings[0].Type != "scan_subtask_error" ||

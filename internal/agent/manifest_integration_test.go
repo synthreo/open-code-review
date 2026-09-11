@@ -356,6 +356,36 @@ func TestManifestFlowAllFailedTimeoutAndPanic(t *testing.T) {
 	}
 }
 
+// The all-failed rollup must name what the per-file failures were. A run whose
+// files all timed out has working credentials, so advising a credential check
+// sends the operator to the wrong fix.
+func TestManifestFlowAllFailedRollupNamesFailureClasses(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		path       string
+		wantClass  session.FailureClass
+		wantAdvice bool
+	}{
+		{name: "timeout", path: "slow.go", wantClass: session.FailureTimeout, wantAdvice: false},
+		{name: "provider", path: "bad.go", wantClass: session.FailureProvider, wantAdvice: true},
+		{name: "panic", path: "panic.go", wantClass: session.FailurePanic, wantAdvice: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := newManifestFlowAgent(t, []model.Diff{{OldPath: tc.path, NewPath: tc.path, Diff: "+x", Insertions: 1}}, nil)
+			_, err := a.dispatchSubtasks(context.Background())
+			if err == nil {
+				t.Fatal("all-failed dispatch must return an error")
+			}
+			if want := fmt.Sprintf("(%s: 1)", tc.wantClass); !strings.Contains(err.Error(), want) {
+				t.Errorf("error %q does not name %q", err, want)
+			}
+			if got := strings.Contains(err.Error(), "check your LLM configuration"); got != tc.wantAdvice {
+				t.Errorf("error %q: credential advice = %v, want %v", err, got, tc.wantAdvice)
+			}
+		})
+	}
+}
+
 // A single item failing by timeout, panic, or budget must stay isolated: the run
 // is partial (not failed), the sibling still completes, and run_failure is nil —
 // per-item outcomes never escalate to a run-level failure.

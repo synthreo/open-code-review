@@ -102,6 +102,7 @@ type Agent struct {
 	currentDate      string
 	session          *session.SessionHistory
 	subtaskFailed    int64 // atomic
+	failures         session.FailureTally
 	runner           *llmloop.Runner
 	resumeInfo       *session.ResumeInfo
 	scanFingerprints map[string]string
@@ -517,6 +518,7 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 	}
 
 	atomic.StoreInt64(&a.subtaskFailed, 0)
+	a.failures.Reset()
 	a.initScanFingerprints(a.items)
 	a.initResumeInfo(a.items)
 
@@ -561,7 +563,7 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 
 	failed := atomic.LoadInt64(&a.subtaskFailed)
 	if failed > 0 && failed == dispatched {
-		return nil, fmt.Errorf("all %d file scan(s) failed — check your LLM configuration and API key", dispatched)
+		return nil, a.failures.AllFailedError("file scan", dispatched)
 	}
 	return a.args.CommentCollector.Comments(), nil
 }
@@ -669,6 +671,7 @@ func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.S
 			completedOK, skipReason, err := a.executeSubtask(fileCtx, it)
 			if err != nil {
 				atomic.AddInt64(&a.subtaskFailed, 1)
+				a.failures.Add(session.ClassifyItemError(err))
 				a.session.RecordReviewItemFailed(it.Path, it.Path, it.Path, fingerprint, err.Error())
 				fmt.Fprintf(stdout.Writer(), "[ocr] Scan subtask error for %s (batch #%d): %v\n", it.Path, batchIdx, err)
 				telemetry.ErrorEvent(fileCtx, "scan.subtask.error", err,
@@ -680,6 +683,8 @@ func (a *Agent) dispatchBatch(ctx context.Context, batchIdx int, batch []model.S
 			if !completedOK {
 				if skipReason != "" {
 					atomic.AddInt64(&a.subtaskFailed, 1)
+					// A file that stopped without task_done has no structured cause.
+					a.failures.Add(session.FailureUnknown)
 					a.session.RecordReviewItemFailed(it.Path, it.Path, it.Path, fingerprint, skipReason)
 					a.recordWarning("scan_subtask_error", it.Path, skipReason)
 				}

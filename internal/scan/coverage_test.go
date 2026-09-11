@@ -726,7 +726,15 @@ func TestDispatchSubtasks_AllFailed(t *testing.T) {
 
 	_, err := a.dispatchSubtasks(context.Background())
 	if err == nil || !strings.Contains(err.Error(), "failed") {
-		t.Errorf("expected all-failed error, got: %v", err)
+		t.Fatalf("expected all-failed error, got: %v", err)
+	}
+	// Every file ran out of time; blaming credentials sends the operator to the
+	// wrong fix, so the rollup must name the class and withhold that advice.
+	if !strings.Contains(err.Error(), "(timeout: 1)") {
+		t.Errorf("all-failed error %q does not name the timeout class", err)
+	}
+	if strings.Contains(err.Error(), "check your LLM configuration") {
+		t.Errorf("all-failed error %q blames LLM configuration for timeouts", err)
 	}
 }
 

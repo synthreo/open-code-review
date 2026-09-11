@@ -186,6 +186,7 @@ type Agent struct {
 	currentDate     string
 	session         *session.SessionHistory
 	subtaskFailed   int64 // count of failed subtasks, accessed atomically
+	failures        session.FailureTally
 	runner          *llmloop.Runner
 	resumeInfo      *ResumeInfo
 	budgetExceeded  bool // set when a token/tool-call budget gate stopped dispatch
@@ -683,6 +684,7 @@ dispatchLoop:
 			defer func() {
 				if r := recover(); r != nil {
 					atomic.AddInt64(&a.subtaskFailed, 1)
+					a.failures.Add(session.FailurePanic)
 					// The recovered panic value can carry arbitrary text; record a
 					// fixed, safe reason in the manifest and keep the detailed value
 					// only in the local checkpoint / warning.
@@ -710,6 +712,7 @@ dispatchLoop:
 				// Classify from the error's structured shape (deadline/cancel/
 				// config/provider); never write the raw err into the manifest.
 				class, reason := classifyItemError(err)
+				a.failures.Add(class)
 				a.markFailed(d, class, reason)
 				a.session.RecordReviewItemFailed(d.NewPath, d.OldPath, d.NewPath, fingerprint, err.Error())
 				fmt.Fprintf(stdout.Writer(), "[ocr] Subtask error for %s: %v\n", d.NewPath, err)
@@ -726,6 +729,7 @@ dispatchLoop:
 					}
 					if stop.reportAsError {
 						atomic.AddInt64(&a.subtaskFailed, 1)
+						a.failures.Add(stop.class)
 						stopErr := errors.New(stop.checkpoint)
 						fmt.Fprintf(stdout.Writer(), "[ocr] Subtask error for %s: %v\n", d.NewPath, stopErr)
 						telemetry.ErrorEvent(fileCtx, "subtask.error", stopErr,
@@ -764,7 +768,7 @@ dispatchLoop:
 	// subtask hard-fails. Preserve the legacy all-failed error only when there is
 	// no reused result; otherwise the manifest is partial and must exit 0.
 	if failed > 0 && failed == dispatched && reused == 0 {
-		return nil, fmt.Errorf("all %d file review(s) failed — check your LLM configuration and API key", dispatched)
+		return nil, a.failures.AllFailedError("file review", dispatched)
 	}
 
 	return a.args.CommentCollector.Comments(), nil
@@ -1106,18 +1110,18 @@ var errMainTaskEmpty = errors.New("main_task.messages is empty in template")
 // safe, generic reason. It never returns the raw error text (which may embed a
 // provider payload, credentials or absolute paths); the full error is persisted
 // separately in the session checkpoint. Context deadline/cancel are recognized
-// via errors.Is (the per-file timeout is the only deadline in play), and the
-// empty-template precondition is a configuration failure.
+// by session.ClassifyItemError (the per-file timeout is the only deadline in
+// play), and the empty-template precondition is a configuration failure.
 func classifyItemError(err error) (session.FailureClass, string) {
-	switch {
-	case errors.Is(err, context.DeadlineExceeded):
-		return session.FailureTimeout, "file review exceeded its time limit"
-	case errors.Is(err, context.Canceled):
-		return session.FailureCancelled, "file review was cancelled"
+	switch class := session.ClassifyItemError(err); {
+	case class == session.FailureTimeout:
+		return class, "file review exceeded its time limit"
+	case class == session.FailureCancelled:
+		return class, "file review was cancelled"
 	case errors.Is(err, errMainTaskEmpty):
 		return session.FailureConfiguration, "review template main_task is empty"
 	default:
-		return session.FailureProvider, "provider or subtask request failed"
+		return class, "provider or subtask request failed"
 	}
 }
 

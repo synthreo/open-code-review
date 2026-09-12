@@ -19,6 +19,17 @@ import (
 	anthropic "github.com/anthropics/anthropic-sdk-go"
 )
 
+func TestAnthropicMappingPreservesProviderZeroUsage(t *testing.T) {
+	var message anthropic.Message
+	if err := json.Unmarshal([]byte(`{"id":"provider-zero","type":"message","role":"assistant","model":"test","content":[],"usage":{"input_tokens":0,"output_tokens":0}}`), &message); err != nil {
+		t.Fatal(err)
+	}
+	response := (&AnthropicClient{}).mapAnthropicResponse(&message)
+	if response.Usage == nil || *response.Usage != (UsageInfo{}) {
+		t.Fatalf("provider zero usage lost by adapter: %+v", response.Usage)
+	}
+}
+
 func TestNewOpenAIClient_URLNormalization(t *testing.T) {
 	tests := []struct {
 		name     string

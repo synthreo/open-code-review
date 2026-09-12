@@ -247,24 +247,28 @@ func (jw *jsonlWriter) WriteLLMRequest(filePath string, taskType TaskType, reque
 	return uuid
 }
 
-// WriteLLMResponse writes a response entry with model, content, reasoning, tool calls, and usage.
-func (jw *jsonlWriter) WriteLLMResponse(filePath string, taskType TaskType, content, reasoningContent string, toolCalls []map[string]any, model string, usage TokenUsage, duration time.Duration, nativePayload any) string {
+// WriteLLMResponse writes a response entry with model, content, reasoning, tool calls, usage
+// and the provider usage provenance (DEV-4977).
+func (jw *jsonlWriter) WriteLLMResponse(filePath string, taskType TaskType, content, reasoningContent string, toolCalls []map[string]any, model string, providerResponseID string, usage TokenUsage, duration time.Duration, nativePayload any) string {
 	uuid := generateUUID()
 
 	jw.mu.Lock()
 	defer jw.mu.Unlock()
 	rec := map[string]any{
-		"uuid":        uuid,
-		"parentUuid":  jw.lastUUID,
-		"type":        "llm_response",
-		"sessionId":   jw.sessionID,
-		"timestamp":   time.Now().UTC().Format(time.RFC3339),
-		"filePath":    filePath,
-		"taskType":    string(taskType),
-		"model":       model,
-		"content":     content,
-		"tool_calls":  toolCalls,
-		"duration_ms": duration.Milliseconds(),
+		"uuid":                      uuid,
+		"parentUuid":                jw.lastUUID,
+		"type":                      "llm_response",
+		"sessionId":                 jw.sessionID,
+		"timestamp":                 time.Now().UTC().Format(time.RFC3339),
+		"filePath":                  filePath,
+		"taskType":                  string(taskType),
+		"model":                     model,
+		"accounting_schema_version": 1,
+		"usage_source":              usage.Source,
+		"provider_response_id":      providerResponseID,
+		"content":                   content,
+		"tool_calls":                toolCalls,
+		"duration_ms":               duration.Milliseconds(),
 		"usage": map[string]int{
 			"prompt_tokens":      usage.PromptTokens,
 			"completion_tokens":  usage.CompletionTokens,

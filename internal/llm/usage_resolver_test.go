@@ -5,6 +5,23 @@ package llm
 
 import "testing"
 
+func TestResolveUsagePreservesExplicitZeroWithoutTotal(t *testing.T) {
+	for _, raw := range []string{
+		`{"usage":{"prompt_tokens":0,"completion_tokens":0}}`,
+		`{"usage":{"input_tokens":0,"output_tokens":0}}`,
+	} {
+		usage := resolveUsage([]byte(raw))
+		if usage == nil || *usage != (UsageInfo{}) {
+			t.Fatalf("explicit provider zeros lost: %+v", usage)
+		}
+	}
+	for _, raw := range []string{`{}`, `{"usage":{}}`, `{"usage":{"prompt_tokens":null}}`} {
+		if usage := resolveUsage([]byte(raw)); usage != nil {
+			t.Fatalf("absent provider counts treated as measured: %+v", usage)
+		}
+	}
+}
+
 func TestResolveUsageOpenAICompatibleCachedTokens(t *testing.T) {
 	usage := resolveUsage([]byte(`{
 		"usage": {

@@ -104,10 +104,12 @@ type TaskRecord struct {
 // Uses actual token counts from the API response when available,
 // falling back to local estimation via tiktoken.
 type TokenUsage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	CacheReadTokens  int `json:"cache_read_tokens,omitempty"`
-	CacheWriteTokens int `json:"cache_write_tokens,omitempty"`
+	// Empty on old records; consumers must treat it as unknown, not provider usage.
+	Source           string `json:"source,omitempty"`
+	PromptTokens     int    `json:"prompt_tokens"`
+	CompletionTokens int    `json:"completion_tokens"`
+	CacheReadTokens  int    `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens int    `json:"cache_write_tokens,omitempty"`
 }
 
 // ResponseRecord holds the parsed LLM response.
@@ -486,7 +488,9 @@ func (tr *TaskRecord) SetResponse(resp *llm.ChatResponse, duration time.Duration
 	}
 
 	var promptTokens, completionTokens, cacheReadTokens, cacheWriteTokens int
+	usageSource := "local_estimate"
 	if resp.Usage != nil {
+		usageSource = "provider"
 		promptTokens = int(resp.Usage.PromptTokens)
 		completionTokens = int(resp.Usage.CompletionTokens)
 		cacheReadTokens = int(resp.Usage.CacheReadTokens)
@@ -499,6 +503,7 @@ func (tr *TaskRecord) SetResponse(resp *llm.ChatResponse, duration time.Duration
 	}
 
 	usage := &TokenUsage{
+		Source:           usageSource,
 		PromptTokens:     promptTokens,
 		CompletionTokens: completionTokens,
 		CacheReadTokens:  cacheReadTokens,
@@ -529,7 +534,7 @@ func (tr *TaskRecord) SetResponse(resp *llm.ChatResponse, duration time.Duration
 				}
 				toolCallsJSON = append(toolCallsJSON, entry)
 			}
-			p.WriteLLMResponse(fs.FilePath, tr.Type, content, choice.Message.ReasoningContent, toolCallsJSON, resp.Model, *usage, duration, nativeTurnForJSON(tr.Response.Native))
+			p.WriteLLMResponse(fs.FilePath, tr.Type, content, choice.Message.ReasoningContent, toolCallsJSON, resp.Model, resp.ID, *usage, duration, nativeTurnForJSON(tr.Response.Native))
 		}
 	}
 }

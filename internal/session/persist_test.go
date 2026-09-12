@@ -15,10 +15,52 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/model"
 )
 
 func init() { UseTestSessions() }
+
+func TestResponseAccountingProvenance(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		usage  *llm.UsageInfo
+		source string
+	}{
+		{"provider", &llm.UsageInfo{PromptTokens: 120, CompletionTokens: 20, CacheReadTokens: 100}, "provider"},
+		{"provider_zero", &llm.UsageInfo{}, "provider"},
+		{"estimated", nil, "local_estimate"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repoDir := t.TempDir()
+			sh := New(repoDir, "main", "test-model", SessionOptions{})
+			content := "reply"
+			rec := sh.GetOrCreateFileSession("test.go").AppendTaskRecord(MainTask, []llm.Message{llm.NewTextMessage("user", "hello")})
+			rec.SetResponse(&llm.ChatResponse{ID: "provider-response-123", Model: "test-model", Usage: tc.usage,
+				Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &content}}}}, time.Second)
+			sh.Finalize()
+			found := 0
+			for _, row := range readJSONLRecords(t, sessionJSONLPath(t, repoDir, sh.SessionID)) {
+				if row["type"] != "llm_response" {
+					continue
+				}
+				found++
+				if row["usage_source"] != tc.source {
+					t.Errorf("usage_source = %v, want %s", row["usage_source"], tc.source)
+				}
+				if row["provider_response_id"] != "provider-response-123" {
+					t.Errorf("provider response identity lost: %v", row)
+				}
+				if row["accounting_schema_version"] != float64(1) {
+					t.Errorf("accounting schema missing: %v", row)
+				}
+			}
+			if found != 1 {
+				t.Fatalf("got %d response receipts, want one", found)
+			}
+		})
+	}
+}
 
 func TestEncodeRepoPath(t *testing.T) {
 	tests := []struct {

@@ -72,7 +72,8 @@ var totalTokensPaths = []string{
 }
 
 // resolveUsage parses raw JSON bytes into a map and extracts token usage
-// by probing configured paths sequentially. Returns nil if no total_tokens found.
+// by probing configured paths sequentially. Explicit zero counts are observations,
+// not absent usage; only missing token fields return nil.
 func resolveUsage(raw []byte) *UsageInfo {
 	var rawBody map[string]any
 	if err := json.Unmarshal(raw, &rawBody); err != nil {
@@ -80,12 +81,12 @@ func resolveUsage(raw []byte) *UsageInfo {
 	}
 
 	total, hasAny := probePath(rawBody, totalTokensPaths)
-	prompt, _ := probePath(rawBody, promptTokensPaths)
-	completion, _ := probePath(rawBody, completionTokensPaths)
+	prompt, hasPrompt := probePath(rawBody, promptTokensPaths)
+	completion, hasCompletion := probePath(rawBody, completionTokensPaths)
 	cacheRead, cacheReadIdx, _ := probePathIndex(rawBody, cacheReadTokensPaths)
 	cacheWrite, cacheWriteIdx, _ := probePathIndex(rawBody, cacheWriteTokensPaths)
 
-	if !hasAny && prompt == 0 && completion == 0 {
+	if !hasAny && !hasPrompt && !hasCompletion {
 		return nil
 	}
 

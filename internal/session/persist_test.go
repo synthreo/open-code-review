@@ -26,10 +26,12 @@ func TestResponseAccountingProvenance(t *testing.T) {
 		name   string
 		usage  *llm.UsageInfo
 		source string
+		basis  string
 	}{
-		{"provider", &llm.UsageInfo{PromptTokens: 120, CompletionTokens: 20, CacheReadTokens: 100}, "provider"},
-		{"provider_zero", &llm.UsageInfo{}, "provider"},
-		{"estimated", nil, "local_estimate"},
+		{"provider", &llm.UsageInfo{PromptTokens: 120, CompletionTokens: 20, CacheReadTokens: 100, InputTokenBasis: llm.InputTokensCacheInclusive}, "provider", "cache_inclusive"},
+		{"provider_ambiguous", &llm.UsageInfo{PromptTokens: 120, CacheReadTokens: 100}, "provider", "unknown"},
+		{"provider_zero", &llm.UsageInfo{}, "provider", "unknown"},
+		{"estimated", nil, "local_estimate", "unknown"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repoDir := t.TempDir()
@@ -51,7 +53,10 @@ func TestResponseAccountingProvenance(t *testing.T) {
 				if row["provider_response_id"] != "provider-response-123" {
 					t.Errorf("provider response identity lost: %v", row)
 				}
-				if row["accounting_schema_version"] != float64(1) {
+				if row["input_token_basis"] != tc.basis {
+					t.Errorf("input token basis = %v, want %s", row["input_token_basis"], tc.basis)
+				}
+				if row["accounting_schema_version"] != float64(2) {
 					t.Errorf("accounting schema missing: %v", row)
 				}
 			}

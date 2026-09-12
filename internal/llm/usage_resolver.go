@@ -10,12 +10,15 @@ import (
 
 // UsageInfo holds token usage extracted from an LLM API response.
 type UsageInfo struct {
-	TotalTokens      int64 `json:"total_tokens"`
-	PromptTokens     int64 `json:"prompt_tokens"`
-	CompletionTokens int64 `json:"completion_tokens"`
-	CacheReadTokens  int64 `json:"cache_read_tokens,omitempty"`
-	CacheWriteTokens int64 `json:"cache_write_tokens,omitempty"`
+	InputTokenBasis  string `json:"input_token_basis,omitempty"`
+	TotalTokens      int64  `json:"total_tokens"`
+	PromptTokens     int64  `json:"prompt_tokens"`
+	CompletionTokens int64  `json:"completion_tokens"`
+	CacheReadTokens  int64  `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens int64  `json:"cache_write_tokens,omitempty"`
 }
+
+const InputTokensCacheInclusive = "cache_inclusive"
 
 var promptTokensPaths = []string{
 	"usage.prompt_tokens",      // OpenAI standard
@@ -81,7 +84,7 @@ func resolveUsage(raw []byte) *UsageInfo {
 	}
 
 	total, hasAny := probePath(rawBody, totalTokensPaths)
-	prompt, hasPrompt := probePath(rawBody, promptTokensPaths)
+	prompt, promptIdx, hasPrompt := probePathIndex(rawBody, promptTokensPaths)
 	completion, hasCompletion := probePath(rawBody, completionTokensPaths)
 	cacheRead, cacheReadIdx, _ := probePathIndex(rawBody, cacheReadTokensPaths)
 	cacheWrite, cacheWriteIdx, _ := probePathIndex(rawBody, cacheWriteTokensPaths)
@@ -97,17 +100,36 @@ func resolveUsage(raw []byte) *UsageInfo {
 		CacheReadTokens:  cacheRead,
 		CacheWriteTokens: cacheWrite,
 	}
+	// Raw Anthropic input_tokens excludes cached input. Normalize it to the
+	// inclusive prompt contract used by the native Anthropic and Responses adapters.
+	// Responses input_tokens already includes its nested cached_tokens subset.
+	rawInput := promptIdx >= 3
+	legacyCacheFields := (cacheReadIdx >= 0 && cacheReadIdx < anthropicCacheReadPathCount) ||
+		(cacheWriteIdx >= 0 && cacheWriteIdx < anthropicCacheWritePathCount)
+	// Legacy proxies combine prompt_tokens with Anthropic cache fields without a
+	// declared inclusion contract. Preserve their counts but do not certify the basis.
+	if hasPrompt && (rawInput || !legacyCacheFields) {
+		ui.InputTokenBasis = InputTokensCacheInclusive
+	}
+	if rawInput {
+		if cacheReadIdx >= 0 && cacheReadIdx < anthropicCacheReadPathCount {
+			ui.PromptTokens += cacheRead
+		}
+		if cacheWriteIdx >= 0 && cacheWriteIdx < anthropicCacheWritePathCount {
+			ui.PromptTokens += cacheWrite
+		}
+	}
 
 	// If TotalTokens wasn't explicitly available but we have prompt+completion, compute it.
 	// Anthropic reports cache tokens separately from input_tokens, so include them in the
 	// fallback total. OpenAI prompt_tokens already includes cached_tokens, so only add cache
 	// counts when they came from Anthropic-style top-level fields.
-	if total == 0 && (prompt > 0 || completion > 0) {
-		ui.TotalTokens = prompt + completion
-		if cacheReadIdx >= 0 && cacheReadIdx < anthropicCacheReadPathCount {
+	if !hasAny && (ui.PromptTokens > 0 || completion > 0) {
+		ui.TotalTokens = ui.PromptTokens + completion
+		if !rawInput && cacheReadIdx >= 0 && cacheReadIdx < anthropicCacheReadPathCount {
 			ui.TotalTokens += cacheRead
 		}
-		if cacheWriteIdx >= 0 && cacheWriteIdx < anthropicCacheWritePathCount {
+		if !rawInput && cacheWriteIdx >= 0 && cacheWriteIdx < anthropicCacheWritePathCount {
 			ui.TotalTokens += cacheWrite
 		}
 	}

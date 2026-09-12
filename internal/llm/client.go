@@ -683,6 +683,7 @@ func (c *OpenAIClient) mapOpenAIResponse(sdkResp *openai.ChatCompletion) *ChatRe
 		u := sdkResp.Usage
 		if u.PromptTokens > 0 || u.CompletionTokens > 0 {
 			usage = &UsageInfo{
+				InputTokenBasis:  InputTokensCacheInclusive,
 				PromptTokens:     u.PromptTokens,
 				CompletionTokens: u.CompletionTokens,
 				TotalTokens:      u.TotalTokens,
@@ -1067,6 +1068,7 @@ func (c *AnthropicClient) mapAnthropicResponse(sdkResp *anthropic.Message) *Chat
 	u := sdkResp.Usage
 	if u.InputTokens > 0 || u.OutputTokens > 0 {
 		usage = &UsageInfo{
+			InputTokenBasis:  InputTokensCacheInclusive,
 			PromptTokens:     u.InputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens,
 			CompletionTokens: u.OutputTokens,
 			CacheReadTokens:  u.CacheReadInputTokens,

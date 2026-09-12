@@ -25,7 +25,7 @@ func TestAnthropicMappingPreservesProviderZeroUsage(t *testing.T) {
 		t.Fatal(err)
 	}
 	response := (&AnthropicClient{}).mapAnthropicResponse(&message)
-	if response.Usage == nil || *response.Usage != (UsageInfo{}) {
+	if response.Usage == nil || *response.Usage != (UsageInfo{InputTokenBasis: InputTokensCacheInclusive}) {
 		t.Fatalf("provider zero usage lost by adapter: %+v", response.Usage)
 	}
 }

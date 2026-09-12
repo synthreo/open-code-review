@@ -101,6 +101,7 @@ type TaskRecord struct {
 // Uses actual token counts from the API response when available,
 // falling back to local estimation via tiktoken.
 type TokenUsage struct {
+	InputTokenBasis string `json:"input_token_basis,omitempty"`
 	// Empty on old records; consumers must treat it as unknown, not provider usage.
 	Source           string `json:"source,omitempty"`
 	PromptTokens     int    `json:"prompt_tokens"`
@@ -419,7 +420,11 @@ func (tr *TaskRecord) SetResponse(resp *llm.ChatResponse, duration time.Duration
 
 	var promptTokens, completionTokens, cacheReadTokens, cacheWriteTokens int
 	usageSource := "local_estimate"
+	inputTokenBasis := "unknown"
 	if resp.Usage != nil {
+		if resp.Usage.InputTokenBasis == llm.InputTokensCacheInclusive {
+			inputTokenBasis = llm.InputTokensCacheInclusive
+		}
 		usageSource = "provider"
 		promptTokens = int(resp.Usage.PromptTokens)
 		completionTokens = int(resp.Usage.CompletionTokens)
@@ -433,6 +438,7 @@ func (tr *TaskRecord) SetResponse(resp *llm.ChatResponse, duration time.Duration
 	}
 
 	usage := &TokenUsage{
+		InputTokenBasis:  inputTokenBasis,
 		Source:           usageSource,
 		PromptTokens:     promptTokens,
 		CompletionTokens: completionTokens,

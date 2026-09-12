@@ -298,6 +298,7 @@ func (c *OpenAIResponsesClient) mapResponsesResponse(sdkResp *responses.Response
 		u := sdkResp.Usage
 		if u.InputTokens > 0 || u.OutputTokens > 0 || u.TotalTokens > 0 {
 			usage = &UsageInfo{
+				InputTokenBasis:  InputTokensCacheInclusive,
 				PromptTokens:     u.InputTokens,
 				CompletionTokens: u.OutputTokens,
 				CacheReadTokens:  u.InputTokensDetails.CachedTokens,

@@ -11,7 +11,7 @@ func TestResolveUsagePreservesExplicitZeroWithoutTotal(t *testing.T) {
 		`{"usage":{"input_tokens":0,"output_tokens":0}}`,
 	} {
 		usage := resolveUsage([]byte(raw))
-		if usage == nil || *usage != (UsageInfo{}) {
+		if usage == nil || *usage != (UsageInfo{InputTokenBasis: InputTokensCacheInclusive}) {
 			t.Fatalf("explicit provider zeros lost: %+v", usage)
 		}
 	}
@@ -76,6 +76,32 @@ func TestResolveUsageWrappedCachedTokens(t *testing.T) {
 	}
 }
 
+func TestResolveUsageAnthropicInputIncludesCacheExactlyOnce(t *testing.T) {
+	for _, tc := range []struct {
+		name, raw     string
+		prompt, total int64
+	}{
+		{"mixed", `{"usage":{"input_tokens":100,"output_tokens":20,"cache_read_input_tokens":40,"cache_creation_input_tokens":15}}`, 155, 175},
+		{"cache_only", `{"usage":{"input_tokens":0,"output_tokens":0,"cache_read_input_tokens":40,"cache_creation_input_tokens":15}}`, 55, 55},
+		{"explicit_total", `{"usage":{"input_tokens":100,"output_tokens":20,"total_tokens":175,"cache_read_input_tokens":40,"cache_creation_input_tokens":15}}`, 155, 175},
+		{"wrapped", `{"data":{"usage":{"input_tokens":100,"output_tokens":20,"cache_read_input_tokens":40,"cache_creation_input_tokens":15}}}`, 155, 175},
+		{"responses", `{"usage":{"input_tokens":100,"output_tokens":20,"input_tokens_details":{"cached_tokens":40}}}`, 100, 120},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			usage := resolveUsage([]byte(tc.raw))
+			if usage == nil {
+				t.Fatal("expected provider usage")
+			}
+			if usage.PromptTokens != tc.prompt || usage.TotalTokens != tc.total {
+				t.Fatalf("prompt=%d total=%d, want prompt=%d total=%d", usage.PromptTokens, usage.TotalTokens, tc.prompt, tc.total)
+			}
+			if usage.InputTokenBasis != InputTokensCacheInclusive {
+				t.Fatalf("normalized input basis = %q", usage.InputTokenBasis)
+			}
+		})
+	}
+}
+
 func TestResolveUsageWrappedAnthropicCompatibleCacheTokens(t *testing.T) {
 	usage := resolveUsage([]byte(`{
 		"data": {
@@ -90,6 +116,9 @@ func TestResolveUsageWrappedAnthropicCompatibleCacheTokens(t *testing.T) {
 
 	if usage == nil {
 		t.Fatal("resolveUsage returned nil")
+	}
+	if usage.InputTokenBasis != "" {
+		t.Fatal("ambiguous proxy input must not claim a cache-inclusive basis")
 	}
 	if usage.CacheReadTokens != 40 {
 		t.Errorf("CacheReadTokens = %d, want 40", usage.CacheReadTokens)

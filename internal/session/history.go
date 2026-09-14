@@ -87,14 +87,15 @@ type FileSession struct {
 
 // TaskRecord captures a single LLM request-response cycle within a file subtask.
 type TaskRecord struct {
-	Type            TaskType
-	RequestNo       int           // sequential number within this task type
-	RequestMessages []llm.Message // messages sent to LLM
-	Response        *ResponseRecord
-	ToolResults     []ToolResultRecord
-	Duration        time.Duration
-	Error           string
-	fileSession     *FileSession // back-reference for JSONL persistence
+	Type             TaskType
+	RequestNo        int           // sequential number within this task type
+	LogicalRequestID string        // stable provider-call identity; empty outside review
+	RequestMessages  []llm.Message // messages sent to LLM
+	Response         *ResponseRecord
+	ToolResults      []ToolResultRecord
+	Duration         time.Duration
+	Error            string
+	fileSession      *FileSession // back-reference for JSONL persistence
 }
 
 // TokenUsage holds token usage for a single LLM request/response cycle.
@@ -453,9 +454,14 @@ func (tr *TaskRecord) SetResponse(resp *llm.ChatResponse, duration time.Duration
 					"arguments": tc.Function.Arguments,
 				})
 			}
-			p.WriteLLMResponse(fs.FilePath, tr.Type, content, toolCallsJSON, resp.Model, *usage, duration)
+			p.WriteLLMResponse(fs.FilePath, tr.Type, tr.LogicalRequestID, content, toolCallsJSON, resp.Model, *usage, duration)
 		}
 	}
+}
+
+// BindLogicalRequestID records the canonical identity sent as the provider idempotency key.
+func (tr *TaskRecord) BindLogicalRequestID(id string) {
+	tr.LogicalRequestID = id
 }
 
 // SetError records an error for this task record, writes an llm_error entry to

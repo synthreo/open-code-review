@@ -67,14 +67,16 @@ type Deps struct {
 // requestCtx returns ctx carrying the identity of one logical LLM request, or
 // ctx unchanged when identity is disabled (scan) or the meta is unusable.
 //
-// Callers must invoke it after AppendTaskRecord and pass that record's
-// RequestNo — the fixed order is AppendTaskRecord -> requestCtx ->
+// Callers must invoke it after AppendTaskRecord and pass that record — the
+// fixed order is AppendTaskRecord -> requestCtx ->
 // CompletionsWithCtx -> SetResponse/SetError.
-func (r *Runner) requestCtx(ctx context.Context, filePath string, taskType session.TaskType, requestNo int) context.Context {
+func (r *Runner) requestCtx(ctx context.Context, filePath string, taskType session.TaskType, rec *session.TaskRecord) context.Context {
 	if r.deps.NewRequestMeta == nil {
 		return ctx
 	}
-	return llm.WithRequestMeta(ctx, r.deps.NewRequestMeta(filePath, taskType, requestNo))
+	meta := r.deps.NewRequestMeta(filePath, taskType, rec.RequestNo)
+	rec.BindLogicalRequestID(meta.LogicalRequestID())
+	return llm.WithRequestMeta(ctx, meta)
 }
 
 // Runner is a per-session (across files) executor of the LLM tool-use
@@ -273,7 +275,7 @@ func (r *Runner) RunPerFile(ctx context.Context, messages []llm.Message, newPath
 
 		// Scoped to this round: ctx itself must stay identity-free so each
 		// iteration's meta replaces the previous one instead of nesting.
-		reqCtx := r.requestCtx(ctx, newPath, session.MainTask, rec.RequestNo)
+		reqCtx := r.requestCtx(ctx, newPath, session.MainTask, rec)
 
 		_, llmSpan := telemetry.StartLLMSpan(ctx, r.deps.Model)
 		resp, err := r.deps.LLMClient.CompletionsWithCtx(reqCtx, llm.ChatRequest{
@@ -591,7 +593,7 @@ func (r *Runner) executeToolCall(ctx context.Context, newPath string, call llm.T
 							// aligned without depending on that.
 							rlCtx := llm.ContextWithSessionKey(rctx,
 								llm.SessionTaskKey(r.deps.Session.SessionID, string(session.ReLocationTask), cm.Path))
-							reqCtx := r.requestCtx(rlCtx, cm.Path, session.ReLocationTask, rlRec.RequestNo)
+							reqCtx := r.requestCtx(rlCtx, cm.Path, session.ReLocationTask, rlRec)
 							_, resp := diff.ReLocateComment(reqCtx, cm, d, r.deps.LLMClient, msgs, r.deps.Model, r.deps.Template.CompletionTokenLimit())
 							if resp != nil {
 								rlRec.SetResponse(resp, time.Since(rlStart))

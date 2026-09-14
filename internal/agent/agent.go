@@ -1435,7 +1435,9 @@ func (a *Agent) executeReviewFilter(ctx context.Context, d model.Diff, newPath s
 	ctx = llm.ContextWithSessionKey(ctx,
 		llm.SessionTaskKey(a.session.SessionID, string(session.ReviewFilterTask), newPath))
 	startTime := time.Now()
-	reqCtx := llm.WithRequestMeta(ctx, a.newRequestMeta(newPath, session.ReviewFilterTask, rec.RequestNo))
+	requestMeta := a.newRequestMeta(newPath, session.ReviewFilterTask, rec.RequestNo)
+	rec.BindLogicalRequestID(requestMeta.LogicalRequestID())
+	reqCtx := llm.WithRequestMeta(ctx, requestMeta)
 
 	_, llmSpan := telemetry.StartLLMSpan(ctx, a.args.Model)
 	resp, err := a.args.LLMClient.CompletionsWithCtx(reqCtx, llm.ChatRequest{
@@ -1707,7 +1709,9 @@ func (a *Agent) executePlanPhase(ctx context.Context, newPath, rawDiff, changeFi
 	ctx = llm.ContextWithSessionKey(ctx,
 		llm.SessionTaskKey(a.session.SessionID, string(session.PlanTask), newPath))
 	startTime := time.Now()
-	reqCtx := llm.WithRequestMeta(ctx, a.newRequestMeta(newPath, session.PlanTask, rec.RequestNo))
+	requestMeta := a.newRequestMeta(newPath, session.PlanTask, rec.RequestNo)
+	rec.BindLogicalRequestID(requestMeta.LogicalRequestID())
+	reqCtx := llm.WithRequestMeta(ctx, requestMeta)
 
 	_, llmSpan := telemetry.StartLLMSpan(ctx, a.args.Model)
 	resp, err := a.args.LLMClient.CompletionsWithCtx(reqCtx, llm.ChatRequest{

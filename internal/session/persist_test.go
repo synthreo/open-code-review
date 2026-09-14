@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/model"
 )
 
@@ -201,6 +202,36 @@ func TestSetErrorWritesJSONL(t *testing.T) {
 	if !found {
 		t.Error("no llm_error record found in JSONL")
 	}
+}
+
+func TestSuccessfulResponsePersistsProviderCallIdentity(t *testing.T) {
+	repoDir := t.TempDir()
+	sh := New(repoDir, "main", "test-model", SessionOptions{ReviewMode: ReviewModeWorkspace})
+	defer sh.Finalize()
+
+	rec := sh.GetOrCreateFileSession("foo.go").AppendTaskRecord(MainTask, nil)
+	rec.BindLogicalRequestID("logical-call-1")
+	content := "ok"
+	rec.SetResponse(&llm.ChatResponse{
+		Choices: []llm.Choice{{Message: llm.ResponseMessage{Content: &content}}},
+		Model:   "test-model", Usage: &llm.UsageInfo{PromptTokens: 2, CompletionTokens: 1},
+	}, time.Second)
+
+	sh.persist.mu.Lock()
+	err := sh.persist.writer.Flush()
+	sh.persist.mu.Unlock()
+	if err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+	for _, record := range readJSONLRecords(t, sessionJSONLPath(t, repoDir, sh.SessionID)) {
+		if record["type"] == "llm_response" {
+			if got := record["logical_request_id"]; got != "logical-call-1" {
+				t.Fatalf("logical_request_id = %v, want logical-call-1", got)
+			}
+			return
+		}
+	}
+	t.Fatal("no llm_response record found")
 }
 
 func TestSessionFilePermissions(t *testing.T) {

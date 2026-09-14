@@ -87,6 +87,7 @@ func TestExecutePlanPhase_Identity(t *testing.T) {
 				t.Fatal("plan request carried no identity")
 			}
 			want := llm.RequestMeta{
+				RunID:     sess.SessionID,
 				Provider:  provider,
 				Model:     "test",
 				FilePath:  "main.go",
@@ -141,6 +142,7 @@ func TestExecuteReviewFilter_Identity(t *testing.T) {
 		t.Fatal("review filter request carried no identity")
 	}
 	want := llm.RequestMeta{
+		RunID:     sess.SessionID,
 		Provider:  "openai",
 		Model:     "test",
 		FilePath:  "a.go",
@@ -167,6 +169,7 @@ func TestNewRequestMeta_IsSingleSourceOfProviderAndModel(t *testing.T) {
 	a := New(Args{Provider: "my-gateway", Model: "m1"})
 	got := a.newRequestMeta("dir/f.go", session.MainTask, 3)
 	want := llm.RequestMeta{
+		RunID:     a.SessionID(),
 		Provider:  "my-gateway",
 		Model:     "m1",
 		FilePath:  "dir/f.go",

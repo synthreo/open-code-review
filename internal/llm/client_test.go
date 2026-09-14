@@ -598,6 +598,50 @@ func TestOpenAIClient_ExtraHeadersSent(t *testing.T) {
 	}
 }
 
+func TestOpenAIClient_LogicalRequestIDOverridesConfiguredIdempotencyKey(t *testing.T) {
+	var keys []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		keys = append(keys, r.Header.Get("Idempotency-Key"))
+		if len(keys) == 1 {
+			http.Error(w, "retry", http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"chatcmpl-idempotent","object":"chat.completion","model":"gpt-test",
+			"choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],
+			"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`))
+	}))
+	defer server.Close()
+
+	client := NewOpenAIClient(ClientConfig{
+		URL: server.URL + "/v1", APIKey: "test-key", Model: "gpt-test",
+		ExtraHeaders: map[string]string{"Idempotency-Key": "unsafe-static-value"},
+	})
+	meta := RequestMeta{
+		RunID: "run-1", Provider: "openai", Model: "gpt-test",
+		FilePath: "a.go", TaskType: "main_task", RequestNo: 1,
+	}
+	_, err := client.CompletionsWithCtx(WithRequestMeta(context.Background(), meta), ChatRequest{
+		Messages: []Message{{Role: "user", Content: "ping"}}, MaxTokens: 64,
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	distinct := meta
+	distinct.RequestNo++
+	_, err = client.CompletionsWithCtx(WithRequestMeta(context.Background(), distinct), ChatRequest{
+		Messages: []Message{{Role: "user", Content: "ping"}}, MaxTokens: 64,
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx distinct: %v", err)
+	}
+	want := meta.LogicalRequestID()
+	if len(keys) != 3 || keys[0] != want || keys[1] != want || keys[2] != distinct.LogicalRequestID() {
+		t.Fatalf("Idempotency-Key values = %v, want retry %q then distinct %q", keys, want, distinct.LogicalRequestID())
+	}
+}
+
 func TestOpenAIClient_RetriesTruncatedResponse(t *testing.T) {
 	const responseBody = `{
 		"id":"chatcmpl-retry",

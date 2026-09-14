@@ -264,6 +264,7 @@ func New(args Args) *Agent {
 // unnamed endpoint, and must not be replaced by the protocol.
 func (a *Agent) newRequestMeta(filePath string, taskType session.TaskType, requestNo int) llm.RequestMeta {
 	return llm.RequestMeta{
+		RunID:     a.SessionID(),
 		Provider:  a.args.Provider,
 		Model:     a.args.Model,
 		FilePath:  filePath,

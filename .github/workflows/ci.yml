@@ -23,7 +23,9 @@ concurrency:
 
 jobs:
   test:
-    runs-on: self-hosted
+    # This repository is public, while Synthreo's trusted ARC group deliberately
+    # refuses public repositories. Keep fork PR code on GitHub-hosted runners.
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     container:
       image: golang:1.26.6
@@ -111,7 +113,8 @@ jobs:
           rm -f ./opencodereview
 
   cross-compile:
-    runs-on: self-hosted
+    # Cross-compiles execute pull-request source and use no deployment secrets.
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     container:
       image: golang:1.26.6

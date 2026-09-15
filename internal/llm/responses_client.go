@@ -112,6 +112,11 @@ func (c *OpenAIResponsesClient) CompletionsWithCtx(ctx context.Context, req Chat
 	for k, v := range expandSessionKeyInHeaders(c.cfg.ExtraHeaders, sessionKey) {
 		opts = append(opts, openaiopt.WithHeader(k, v))
 	}
+	if meta, ok := RequestMetaFromContext(ctx); ok {
+		if requestID := meta.LogicalRequestID(); requestID != "" {
+			opts = append(opts, openaiopt.WithHeader("Idempotency-Key", requestID))
+		}
+	}
 	for k, v := range expandSessionKeyInBody(c.cfg.ExtraBody, sessionKey) {
 		// This client is non-streaming: it calls Responses.New, which expects a
 		// single JSON body. If a provider config sets extra_body.stream=true

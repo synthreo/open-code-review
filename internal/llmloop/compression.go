@@ -240,7 +240,7 @@ func (r *Runner) runCompression(ctx context.Context, msgs []llm.Message, filePat
 		llm.SessionTaskKey(r.deps.Session.SessionID, string(session.MemoryCompressionTask), filePath))
 
 	startTime := time.Now()
-	reqCtx := r.requestCtx(ctx, filePath, session.MemoryCompressionTask, rec.RequestNo)
+	reqCtx := r.requestCtx(ctx, filePath, session.MemoryCompressionTask, rec)
 	resp, err := r.deps.LLMClient.CompletionsWithCtx(reqCtx, llm.ChatRequest{
 		Model:     r.deps.Model,
 		Messages:  compressionMsgs,

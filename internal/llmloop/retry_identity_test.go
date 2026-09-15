@@ -168,6 +168,26 @@ func TestRunPerFile_NoIdentityWhenFactoryNil(t *testing.T) {
 	}
 }
 
+func TestRunPerFile_PersistsTheProviderIdempotencyIdentity(t *testing.T) {
+	client := &metaCaptureClient{respond: func(int) *llm.ChatResponse { return taskDoneResponse() }}
+	deps := newTestDeps(client)
+	deps.NewRequestMeta = func(filePath string, taskType session.TaskType, requestNo int) llm.RequestMeta {
+		return llm.RequestMeta{
+			RunID: "review-run", Provider: "openai", Model: deps.Model,
+			FilePath: filePath, TaskType: string(taskType), RequestNo: requestNo,
+		}
+	}
+	runner := NewRunner(deps)
+	if _, _, err := runner.RunPerFile(context.Background(), []llm.Message{llm.NewTextMessage("user", "review")}, "main.go"); err != nil {
+		t.Fatalf("RunPerFile: %v", err)
+	}
+	rec := deps.Session.GetOrCreateFileSession("main.go").TaskRecords[session.MainTask][0]
+	want := client.requests()[0].meta.LogicalRequestID()
+	if want == "" || rec.LogicalRequestID != want {
+		t.Fatalf("stored logical identity = %q, want %q", rec.LogicalRequestID, want)
+	}
+}
+
 // newCompressionRunner returns a Runner whose template forces runCompression to
 // issue a request, plus the message slice to feed it.
 func newCompressionRunner(t *testing.T, client llm.LLMClient, factory func(string, session.TaskType, int) llm.RequestMeta) (*Runner, []llm.Message) {

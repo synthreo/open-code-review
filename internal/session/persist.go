@@ -243,7 +243,7 @@ func (jw *jsonlWriter) WriteLLMRequest(filePath string, taskType TaskType, reque
 }
 
 // WriteLLMResponse writes a response entry with model, content, tool calls, usage.
-func (jw *jsonlWriter) WriteLLMResponse(filePath string, taskType TaskType, content string, toolCalls []map[string]any, model string, usage TokenUsage, duration time.Duration) string {
+func (jw *jsonlWriter) WriteLLMResponse(filePath string, taskType TaskType, logicalRequestID string, content string, toolCalls []map[string]any, model string, usage TokenUsage, duration time.Duration) string {
 	uuid := generateUUID()
 
 	jw.mu.Lock()
@@ -267,13 +267,16 @@ func (jw *jsonlWriter) WriteLLMResponse(filePath string, taskType TaskType, cont
 			"cache_write_tokens": usage.CacheWriteTokens,
 		},
 	}
+	if logicalRequestID != "" {
+		rec["logical_request_id"] = logicalRequestID
+	}
 	jw.writeRecordLocked(rec)
 	jw.lastUUID = uuid
 	return uuid
 }
 
 // WriteLLMError writes an llm_error entry recording a failed LLM request.
-func (jw *jsonlWriter) WriteLLMError(filePath string, taskType TaskType, requestNo int, errorMsg string, duration time.Duration) string {
+func (jw *jsonlWriter) WriteLLMError(filePath string, taskType TaskType, requestNo int, logicalRequestID, errorMsg string, duration time.Duration) string {
 	uuid := generateUUID()
 
 	jw.mu.Lock()
@@ -289,6 +292,9 @@ func (jw *jsonlWriter) WriteLLMError(filePath string, taskType TaskType, request
 		"request_no":  requestNo,
 		"error":       errorMsg,
 		"duration_ms": duration.Milliseconds(),
+	}
+	if logicalRequestID != "" {
+		rec["logical_request_id"] = logicalRequestID
 	}
 	jw.writeRecordLocked(rec)
 	jw.lastUUID = uuid

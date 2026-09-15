@@ -33,11 +33,11 @@ const logicalRequestIDVersion = "ocr.llm-request/v1"
 //     is scoped per (FilePath, TaskType). That scoping is what makes the tuple
 //     unique within a run.
 //
-// run_id is deliberately absent. It is only needed to compute
-// logical_request_id, which happens in RetryCollector.Freeze, so the collector
-// can be constructed before the session exists — the client is built in
-// loadLLMRuntime, well before agent.New.
+// RunID is attached per request after the session exists. It lets the client
+// send the same canonical identity on every SDK attempt; Freeze independently
+// supplies the same run ID when it builds the final retry report.
 type RequestMeta struct {
+	RunID string
 	// Provider is the resolved provider label. It is legitimately empty for an
 	// unnamed endpoint (only llm.ResolvedEndpoint built from the provider
 	// config path carries a name), so empty is a valid value and never means
@@ -61,12 +61,24 @@ func (m RequestMeta) valid() bool {
 	if strings.ContainsRune(m.Provider, 0) {
 		return false
 	}
+	if strings.ContainsRune(m.RunID, 0) {
+		return false
+	}
 	for _, s := range []string{m.Model, m.FilePath, m.TaskType} {
 		if s == "" || strings.ContainsRune(s, 0) {
 			return false
 		}
 	}
 	return true
+}
+
+// LogicalRequestID returns the stable identity shared by provider retries and
+// the final retry report. Invalid metadata has no usable identity.
+func (m RequestMeta) LogicalRequestID() string {
+	if !m.valid() || m.RunID == "" {
+		return ""
+	}
+	return m.logicalRequestID(m.RunID)
 }
 
 // logicalRequestID computes the canonical logical_request_id for m under runID.

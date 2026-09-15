@@ -572,6 +572,41 @@ func TestOpenAIResponsesClient_EndToEnd(t *testing.T) {
 	}
 }
 
+func TestOpenAIResponsesClient_LogicalRequestIDSurvivesSDKRetry(t *testing.T) {
+	var keys []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		keys = append(keys, r.Header.Get("Idempotency-Key"))
+		if len(keys) == 1 {
+			http.Error(w, "retry", http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"resp_idempotent","object":"response","model":"gpt-5.4","status":"completed",
+			"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],
+			"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}`))
+	}))
+	defer server.Close()
+
+	client := NewOpenAIResponsesClient(ClientConfig{
+		URL: server.URL + "/v1", APIKey: "test-key", Model: "gpt-5.4",
+		ExtraHeaders: map[string]string{"Idempotency-Key": "unsafe-static-value"},
+	})
+	meta := RequestMeta{
+		RunID: "run-1", Provider: "openai", Model: "gpt-5.4",
+		FilePath: "a.go", TaskType: "main_task", RequestNo: 1,
+	}
+	_, err := client.CompletionsWithCtx(WithRequestMeta(context.Background(), meta), ChatRequest{
+		Messages: []Message{{Role: "user", Content: "ping"}}, MaxTokens: 64,
+	})
+	if err != nil {
+		t.Fatalf("CompletionsWithCtx: %v", err)
+	}
+	if want := meta.LogicalRequestID(); len(keys) != 2 || keys[0] != want || keys[1] != want {
+		t.Fatalf("Idempotency-Key values = %v, want retry key %q", keys, want)
+	}
+}
+
 // TestOpenAIResponsesClient_ExtraBodyStreamDropped verifies that an
 // extra_body.stream=true (valid for the Chat Completions client) is NOT
 // forwarded to the Responses API. Forwarding it makes the API answer with SSE

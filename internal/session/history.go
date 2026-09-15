@@ -472,7 +472,7 @@ func (tr *TaskRecord) SetError(err error, duration time.Duration) {
 
 	if fs := tr.fileSession; fs != nil {
 		if p := fs.session.persist; p != nil {
-			p.WriteLLMError(fs.FilePath, tr.Type, tr.RequestNo, err.Error(), duration)
+			p.WriteLLMError(fs.FilePath, tr.Type, tr.RequestNo, tr.LogicalRequestID, err.Error(), duration)
 		}
 		atomic.AddInt64(&fs.session.llmFailures, 1)
 	}

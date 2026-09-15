@@ -169,6 +169,7 @@ func TestSetErrorWritesJSONL(t *testing.T) {
 
 	fs := sh.GetOrCreateFileSession("foo.go")
 	rec := fs.AppendTaskRecord(MainTask, nil)
+	rec.BindLogicalRequestID("logical-call-failed")
 	rec.SetError(fmt.Errorf("connection refused"), 500*time.Millisecond)
 
 	if sh.persist != nil {
@@ -195,6 +196,9 @@ func TestSetErrorWritesJSONL(t *testing.T) {
 			}
 			if r["error"] != "connection refused" {
 				t.Errorf("error = %v, want connection refused", r["error"])
+			}
+			if r["logical_request_id"] != "logical-call-failed" {
+				t.Errorf("logical_request_id = %v, want logical-call-failed", r["logical_request_id"])
 			}
 			break
 		}

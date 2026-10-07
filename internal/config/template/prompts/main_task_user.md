@@ -1,3 +1,9 @@
+### Requirement Background (Optional)
+{{requirement_background}}
+
+### Review Checklist
+{{system_rule}}
+
 // The following is the list of other files changed in this update.
 <other_changed_files>
 {{change_files}}
@@ -12,14 +18,8 @@
 Current time in the real world: {{current_system_date_time}}
 
 <user_task>
-### Requirement Background (Optional)
-{{requirement_background}}
-
-### Review Checklist
-{{system_rule}}
-
 ### Review Plan (Optional)
 {{plan_guidance}}
 
-Now please review the code changes in <current_file_diff>
+Now please review the code changes in <current_file_diff>, applying the Requirement Background and Review Checklist above.
 </user_task>

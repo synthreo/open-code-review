@@ -197,6 +197,27 @@ type Agent struct {
 	// and consumed by finalizeManifest to fill the manifest input/repository.
 	inputResolution    diff.InputResolution
 	repoRemoteIdentity string
+
+	// completions receives a token each time a request through args.LLMClient returns, so the
+	// dispatcher can hold the fan-out until the run's first request has completed (DEV-12640).
+	completions chan struct{}
+}
+
+// completionSignal wraps the run's LLM client and signals, without blocking, each time a
+// request returns, whatever its outcome.
+type completionSignal struct {
+	inner llm.LLMClient
+	done  chan<- struct{}
+}
+
+func (c completionSignal) CompletionsWithCtx(ctx context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	defer func() {
+		select {
+		case c.done <- struct{}{}:
+		default:
+		}
+	}()
+	return c.inner.CompletionsWithCtx(ctx, req)
 }
 
 // ResumeInfo summarizes file-level reuse for a resumed review.
@@ -225,9 +246,14 @@ func New(args Args) *Agent {
 			Operation:   session.OperationReview,
 		})
 	}
+	completions := make(chan struct{}, 1)
+	if args.LLMClient != nil {
+		args.LLMClient = completionSignal{inner: args.LLMClient, done: completions}
+	}
 	a := &Agent{
-		args:    args,
-		session: args.Session,
+		args:        args,
+		session:     args.Session,
+		completions: completions,
 	}
 	a.initManifest()
 	// DiffLookup closure captures a so the runner can resolve per-file
@@ -608,11 +634,38 @@ func (a *Agent) dispatchSubtasks(ctx context.Context) ([]model.LlmComment, error
 	sem := make(chan struct{}, concurrency)
 	timeout := time.Duration(a.args.ConcurrentTaskTimeout) * time.Minute
 
+	// WARM THE SHARED PREFIX BEFORE THE FAN-OUT (DEV-12640). Every file's first request opens with
+	// the same system prompt, tools, background and checklist, and a provider can serve that prefix
+	// from cache only after some request has computed it. Launched together, the first requests all
+	// miss: in prod each read only the ~1k-token system prefix while later calls read ~16k. So the
+	// second file waits until the first file's first request returns (or that file ends without
+	// one); everything after it, later rounds included, runs in parallel as before.
+	reviewable := 0
+	for i := range toDispatch {
+		if !toDispatch[i].IsDeleted {
+			reviewable++
+		}
+	}
+	warmPending := reviewable > 1 && concurrency > 1
+	var firstFileDone chan struct{}
+	for len(a.completions) > 0 {
+		<-a.completions
+	}
+
 	var dispatched int64
 dispatchLoop:
 	for i := range toDispatch {
 		if toDispatch[i].IsDeleted {
 			continue
+		}
+		if firstFileDone != nil && warmPending {
+			warmPending = false
+			select {
+			case <-a.completions:
+			case <-firstFileDone:
+			case <-ctx.Done():
+				break dispatchLoop
+			}
 		}
 
 		// Per-file budget look-ahead, checked BEFORE acquiring the semaphore
@@ -670,10 +723,18 @@ dispatchLoop:
 		}
 		dispatched++
 		wg.Add(1)
+		var fileDone chan struct{}
+		if dispatched == 1 {
+			firstFileDone = make(chan struct{})
+			fileDone = firstFileDone
+		}
 
-		go func(d model.Diff) {
+		go func(d model.Diff, fileDone chan struct{}) {
 			fingerprint := reviewItemFingerprint(a.reviewMode(), d)
 			defer wg.Done()
+			if fileDone != nil {
+				defer close(fileDone)
+			}
 			defer func() { <-sem }() // release
 			// A panic while reviewing one file must be isolated exactly like an
 			// error return: counted in subtaskFailed and recorded as a
@@ -742,7 +803,7 @@ dispatchLoop:
 			comments := a.args.CommentCollector.CommentsForPath(d.NewPath)
 			a.markCompleted(d)
 			a.session.RecordReviewItemDone(d.NewPath, d.OldPath, d.NewPath, fingerprint, comments)
-		}(toDispatch[i])
+		}(toDispatch[i], fileDone)
 	}
 
 	wg.Wait()

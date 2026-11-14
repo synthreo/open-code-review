@@ -60,6 +60,8 @@
           ],
           "Model": "fake",
           "Usage": {
+            "input_token_basis": "unknown",
+            "source": "provider",
             "prompt_tokens": 20,
             "completion_tokens": 10
           },
@@ -108,6 +110,8 @@
           ],
           "Model": "fake",
           "Usage": {
+            "input_token_basis": "unknown",
+            "source": "provider",
             "prompt_tokens": 10,
             "completion_tokens": 5
           },
@@ -141,6 +145,8 @@
           "ToolCalls": null,
           "Model": "",
           "Usage": {
+            "input_token_basis": "unknown",
+            "source": "provider",
             "prompt_tokens": 11,
             "completion_tokens": 7,
             "cache_read_tokens": 3,

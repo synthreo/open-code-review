@@ -68,6 +68,8 @@
           ],
           "Model": "fake",
           "Usage": {
+            "input_token_basis": "unknown",
+            "source": "provider",
             "prompt_tokens": 20,
             "completion_tokens": 10
           },
@@ -135,6 +137,8 @@
           ],
           "Model": "",
           "Usage": {
+            "input_token_basis": "unknown",
+            "source": "local_estimate",
             "prompt_tokens": 20,
             "completion_tokens": 1
           },
@@ -221,6 +225,8 @@
           ],
           "Model": "fake",
           "Usage": {
+            "input_token_basis": "unknown",
+            "source": "provider",
             "prompt_tokens": 10,
             "completion_tokens": 5
           },

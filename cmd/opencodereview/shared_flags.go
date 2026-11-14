@@ -199,6 +199,8 @@ func validateDelegateOptions(opts *delegateOptions) error {
 // registerReviewFlags registers all review command flags on cmd, binding to opts.
 func registerReviewFlags(cmd *cobra.Command, opts *reviewOptions) {
 	addRuleFlag(cmd, &opts.rulePath)
+	// Synthreo (DEV-16164): review-only; scan keeps upstream's no-override contract (#1894).
+	cmd.Flags().StringVar(&opts.toolsPath, "tools", "", "path to a JSON file that replaces the main task's built-in tool set (subset or re-described built-in tools; must include task_done)")
 	addRepoFlag(cmd, &opts.repoDir)
 	addDiffFlags(cmd, &opts.from, &opts.to, &opts.commit)
 	cmd.Flags().StringVar(&opts.resume, "resume", "", "resume from a previous review session id")

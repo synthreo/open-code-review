@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/alibaba/open-code-review/internal/agent"
+	"github.com/alibaba/open-code-review/internal/config/template"
 	"github.com/alibaba/open-code-review/internal/config/toolsconfig"
 	"github.com/alibaba/open-code-review/internal/diff"
 	"github.com/alibaba/open-code-review/internal/llm"
@@ -29,6 +30,7 @@ import (
 
 type reviewOptions struct {
 	rulePath              string
+	toolsPath             string
 	repoDir               string
 	from                  string
 	to                    string
@@ -161,16 +163,9 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		return err
 	}
 
-	mainToolDefs, err := loadToolDefs(cc.Template.MainTask.Tools)
+	mainToolDefs, planToolDefs, err := resolveReviewToolDefs(cc.Template, opts.toolsPath)
 	if err != nil {
-		return fmt.Errorf("MAIN_TASK.tools: %w", err)
-	}
-	var planToolDefs []llm.ToolDef
-	if plan := cc.Template.PlanTask; plan != nil {
-		planToolDefs, err = loadToolDefs(plan.ToolReferences)
-		if err != nil {
-			return fmt.Errorf("PLAN_TASK.tool_references: %w", err)
-		}
+		return err
 	}
 	rt, err := loadLLMRuntime(cc.Template, llm.ResolveOptions{
 		Provider: opts.provider,
@@ -341,6 +336,55 @@ func executeReviewContext(ctx context.Context, opts reviewOptions) (retErr error
 		return errors.Join(resultErr, emitErr)
 	}
 	return emitErr
+}
+
+// resolveReviewToolDefs returns the MAIN_TASK tools and the PLAN_TASK tool
+// references. Without a tools file both come from the template. With one
+// (Synthreo, DEV-16164) the main task gets exactly the file's tools, in file
+// order, and the plan may reference only those of its references the main task
+// can actually call, so a comment-only profile is never planned around
+// exploration tools it lacks.
+func resolveReviewToolDefs(tpl *template.Template, toolsPath string) ([]llm.ToolDef, []llm.ToolDef, error) {
+	var planRefs []string
+	if tpl.PlanTask != nil {
+		planRefs = tpl.PlanTask.ToolReferences
+	}
+	if toolsPath == "" {
+		mainToolDefs, err := loadToolDefs(tpl.MainTask.Tools)
+		if err != nil {
+			return nil, nil, fmt.Errorf("MAIN_TASK.tools: %w", err)
+		}
+		planToolDefs, err := loadToolDefs(planRefs)
+		if err != nil {
+			return nil, nil, fmt.Errorf("PLAN_TASK.tool_references: %w", err)
+		}
+		return mainToolDefs, planToolDefs, nil
+	}
+	entries, err := toolsconfig.LoadFile(toolsPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	names := make([]string, 0, len(entries))
+	inFile := make(map[string]bool, len(entries))
+	for _, entry := range entries {
+		names = append(names, entry.Name)
+		inFile[entry.Name] = true
+	}
+	mainToolDefs, err := toolsconfig.Resolve(entries, names)
+	if err != nil {
+		return nil, nil, fmt.Errorf("--tools: %w", err)
+	}
+	var shared []string
+	for _, name := range planRefs {
+		if inFile[name] {
+			shared = append(shared, name)
+		}
+	}
+	planToolDefs, err := toolsconfig.Resolve(entries, shared)
+	if err != nil {
+		return nil, nil, fmt.Errorf("--tools: %w", err)
+	}
+	return mainToolDefs, planToolDefs, nil
 }
 
 func resolveReviewMaxTools(templateDefault, cliValue int) int {

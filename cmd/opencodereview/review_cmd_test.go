@@ -10,50 +10,128 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/alibaba/open-code-review/internal/config/template"
+	"github.com/alibaba/open-code-review/internal/llm"
 	"github.com/alibaba/open-code-review/internal/session"
 	"github.com/spf13/cobra"
 )
 
-func TestCommandsRejectToolsOverride(t *testing.T) {
-	for _, command := range []string{"review", "scan"} {
-		for _, args := range [][]string{
-			{"--tools", "custom-tools.json"},
-			{"--tools=custom-tools.json"},
-			{"--tools="},
-			{"--preview", "--tools", "custom-tools.json"},
-			{"--preview", "--tools=custom-tools.json"},
-		} {
-			t.Run(command+"/"+strings.Join(args, " "), func(t *testing.T) {
-				var err error
-				if command == "review" {
-					_, err = parseReviewFlags(args)
-				} else {
-					_, err = parseScanFlags(args)
-				}
-				if err == nil || !strings.Contains(err.Error(), "unknown flag: --tools") {
-					t.Fatalf("got %v, want unknown tools flag", err)
-				}
-			})
-		}
+// Synthreo (DEV-16164): `ocr review --tools` is kept for a caller-owned main-task tool set;
+// `ocr scan` follows upstream (#1894) and has no override.
+func TestScanRejectsToolsOverride(t *testing.T) {
+	for _, args := range [][]string{
+		{"--tools", "custom-tools.json"},
+		{"--tools=custom-tools.json"},
+		{"--preview", "--tools", "custom-tools.json"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			_, err := parseScanFlags(args)
+			if err == nil || !strings.Contains(err.Error(), "unknown flag: --tools") {
+				t.Fatalf("got %v, want unknown tools flag", err)
+			}
+		})
 	}
 }
 
-func TestCommandsToolFlags(t *testing.T) {
-	for _, command := range []string{"review", "scan"} {
-		t.Run(command, func(t *testing.T) {
-			cmd := &cobra.Command{Use: command}
-			if command == "review" {
-				registerReviewFlags(cmd, &reviewOptions{})
-			} else {
-				registerScanFlags(cmd, &scanOptions{})
-			}
-			if cmd.Flags().Lookup("tools") != nil || strings.Contains(cmd.Flags().FlagUsages(), "--tools") {
-				t.Fatal("removed tools override is still advertised")
-			}
-			if cmd.Flags().Lookup("max-tools") == nil {
-				t.Fatal("tool round budget flag must remain available")
+func TestReviewAcceptsToolsFile(t *testing.T) {
+	opts, err := parseReviewFlags([]string{"--tools", "comment-only-tools.json"})
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if opts.toolsPath != "comment-only-tools.json" {
+		t.Fatalf("toolsPath = %q", opts.toolsPath)
+	}
+	cmd := &cobra.Command{Use: "scan"}
+	registerScanFlags(cmd, &scanOptions{})
+	if cmd.Flags().Lookup("tools") != nil {
+		t.Fatal("scan must not advertise --tools")
+	}
+	if cmd.Flags().Lookup("max-tools") == nil {
+		t.Fatal("tool round budget flag must remain available")
+	}
+}
+
+const commentOnlyToolsJSON = `[
+ {"name":"task_done","definition":{"name":"task_done","description":"Finish with DONE.","parameters":{"type":"object","properties":{"state":{"type":"string","enum":["DONE"]}},"required":["state"]}}},
+ {"name":"code_comment","definition":{"name":"code_comment","description":"Report findings.","parameters":{"type":"object","properties":{"comments":{"type":"array","items":{"type":"object"}}},"required":["comments"]}}}
+]`
+
+func writeToolsFile(t *testing.T, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "tools.json")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func toolNames(defs []llm.ToolDef) []string {
+	names := make([]string, 0, len(defs))
+	for _, d := range defs {
+		names = append(names, d.Function.Name)
+	}
+	return names
+}
+
+// A tools file replaces MAIN_TASK's tool set with exactly the caller's definitions, and the plan
+// phase may reference only tools the main task can actually call: a comment-only profile must not
+// be planned around repository-exploration tools it does not have.
+func TestResolveReviewToolDefsWithToolsFile(t *testing.T) {
+	tpl, err := template.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	main, plan, err := resolveReviewToolDefs(tpl, writeToolsFile(t, commentOnlyToolsJSON))
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if got := strings.Join(toolNames(main), ","); got != "task_done,code_comment" {
+		t.Fatalf("main tools = %s", got)
+	}
+	if !strings.Contains(main[0].Function.Description, "Finish with DONE.") {
+		t.Fatalf("task_done keeps the caller's definition, got %q", main[0].Function.Description)
+	}
+	if len(plan) != 0 {
+		t.Fatalf("plan tool references = %v, want none", toolNames(plan))
+	}
+}
+
+func TestResolveReviewToolDefsDefault(t *testing.T) {
+	tpl, err := template.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	main, plan, err := resolveReviewToolDefs(tpl, "")
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	if strings.Join(toolNames(main), ",") != strings.Join(tpl.MainTask.Tools, ",") {
+		t.Fatalf("main tools = %v, want template %v", toolNames(main), tpl.MainTask.Tools)
+	}
+	if len(plan) != len(tpl.PlanTask.ToolReferences) {
+		t.Fatalf("plan tools = %v", toolNames(plan))
+	}
+}
+
+func TestResolveReviewToolDefsRejectsBadFiles(t *testing.T) {
+	tpl, err := template.LoadDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{
+		"empty":        `[]`,
+		"no task_done": `[{"name":"code_comment","definition":{"name":"code_comment","description":"x","parameters":{"type":"object"}}}]`,
+		"unknown tool": `[{"name":"task_done","definition":{"name":"task_done","description":"x","parameters":{"type":"object"}}},{"name":"shell","definition":{"name":"shell","description":"x","parameters":{"type":"object"}}}]`,
+		"not json":     `{`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, _, err := resolveReviewToolDefs(tpl, writeToolsFile(t, body)); err == nil {
+				t.Fatal("want error")
 			}
 		})
+	}
+	if _, _, err := resolveReviewToolDefs(tpl, filepath.Join(t.TempDir(), "missing.json")); err == nil {
+		t.Fatal("missing file: want error")
 	}
 }
 
